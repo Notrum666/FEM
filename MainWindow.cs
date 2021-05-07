@@ -22,6 +22,7 @@ namespace FEM
         private Func<double, double, double, double> deltaTime;
         private bool disableLimit;
         private double timeScale;
+        private bool pause = false;
         public MainWindow(int width, int height) : base(width, height, GraphicsMode.Default, "FEM", GameWindowFlags.FixedWindow)
         {
             Input.Init();
@@ -31,7 +32,6 @@ namespace FEM
             GL.CullFace(CullFaceMode.Back);
 
             camera = new Camera(16f, 9f);
-
         }
         protected override void OnLoad(EventArgs e)
         {
@@ -51,7 +51,7 @@ namespace FEM
             lines = File.ReadAllLines("initial condition.txt");
             problem.initialCondition = ParseExpression(lines[0]);
             lines = File.ReadAllLines("config.txt");
-            deltaTime = (x, y, t) => 1.0;
+            deltaTime = (_x, _y, t) => 1.0;
             minTemp = 0.0;
             maxTemp = 1.0;
             timeScale = 1.0;
@@ -63,7 +63,7 @@ namespace FEM
                 {
                     case "dt":
                     case "deltatime":
-                        deltaTime = ParseExpression(words[1]); //double.Parse(words[1].Replace(',', '.'), CultureInfo.InvariantCulture);
+                        deltaTime = ParseExpression(words[1]);
                         break;
                     case "mintemp":
                         minTemp = double.Parse(words[1].Replace(',', '.'), CultureInfo.InvariantCulture);
@@ -93,6 +93,80 @@ namespace FEM
                                                          new ShaderComponent("Assets\\Shaders\\default.gsh"),
                                                          new ShaderComponent("Assets\\Shaders\\default.vsh"));
         }
+        public double get(double X, double Y, double[] coeffs)
+        {
+            bool isInside(int polygonIndex)
+            {
+                NMath.Vector2[] poly = problem.solution.mesh.polygons[polygonIndex].Select(index => problem.solution.mesh.vertexes[index]).ToArray();
+                double Bx, By, Cx, Cy;
+                Bx = poly[1].X - poly[0].X;
+                By = poly[1].Y - poly[0].Y;
+                Cx = poly[2].X - poly[0].X;
+                Cy = poly[2].Y - poly[0].Y;
+                double m = ((X - poly[0].X) * By - (Y - poly[0].Y) * Bx) / (Cx * By - Cy * Bx);
+                if (m >= 0 && m <= 1)
+                {
+                    double l = ((X - poly[0].X) * Cy - (Y - poly[0].Y) * Cx) / (Bx * Cy - By * Cx);
+                    if (l >= 0 && m + l <= 1)
+                        return true;
+                }
+                return false;
+            }
+            int getAdditionalVertexBetween(int i, int j)
+            {
+                if (j > i)
+                {
+                    i = i + j;
+                    j = i - j;
+                    i = i - j;
+                }
+                foreach (KeyValuePair<int, int> pair in problem.solution.adjacencyList[i])
+                    if (pair.Key == j)
+                        return pair.Value;
+                return -1;
+            }
+            for (int i = 0; i < problem.solution.mesh.polygons.Length; i++)
+            {
+                if (isInside(i))
+                {
+                    NMath.Vector2 A = problem.solution.mesh.vertexes[problem.solution.mesh.polygons[i][0]];
+                    NMath.Vector2 B = problem.solution.mesh.vertexes[problem.solution.mesh.polygons[i][1]];
+                    NMath.Vector2 C = problem.solution.mesh.vertexes[problem.solution.mesh.polygons[i][2]];
+                    double detD = (B.X * C.Y - C.X * B.Y) - (A.X * C.Y - C.X * A.Y) + (A.X * B.Y - B.X * A.Y);
+                    double[,] alphaMatrix = new double[3, 3];
+                    alphaMatrix[0, 0] = (B.X * C.Y - C.X * B.Y) / detD;
+                    alphaMatrix[1, 0] = -(A.X * C.Y - C.X * A.Y) / detD;
+                    alphaMatrix[2, 0] = (A.X * B.Y - B.X * A.Y) / detD;
+                    alphaMatrix[0, 1] = -(C.Y - B.Y) / detD;
+                    alphaMatrix[1, 1] = (C.Y - A.Y) / detD;
+                    alphaMatrix[2, 1] = -(B.Y - A.Y) / detD;
+                    alphaMatrix[0, 2] = (C.X - B.X) / detD;
+                    alphaMatrix[1, 2] = -(C.X - A.X) / detD;
+                    alphaMatrix[2, 2] = (B.X - A.X) / detD;
+
+                    double L1, L2, L3;
+                    L1 = alphaMatrix[0, 0] + alphaMatrix[0, 1] * X + alphaMatrix[0, 2] * Y;
+                    L2 = alphaMatrix[1, 0] + alphaMatrix[1, 1] * X + alphaMatrix[1, 2] * Y;
+                    L3 = alphaMatrix[2, 0] + alphaMatrix[2, 1] * X + alphaMatrix[2, 2] * Y;
+
+                    double psi1, psi2, psi3, psi4, psi5, psi6;
+                    psi1 = 2.0 * L1 * L1 - L1;
+                    psi2 = 2.0 * L2 * L2 - L2;
+                    psi3 = 2.0 * L3 * L3 - L3;
+                    psi4 = 4.0 * L1 * L2;
+                    psi5 = 4.0 * L2 * L3;
+                    psi6 = 4.0 * L1 * L3;
+
+                    return coeffs[problem.solution.mesh.polygons[i][0]] * psi1 +
+                           coeffs[problem.solution.mesh.polygons[i][1]] * psi2 +
+                           coeffs[problem.solution.mesh.polygons[i][2]] * psi3 +
+                           coeffs[getAdditionalVertexBetween(problem.solution.mesh.polygons[i][0], problem.solution.mesh.polygons[i][1])] * psi4 +
+                           coeffs[getAdditionalVertexBetween(problem.solution.mesh.polygons[i][1], problem.solution.mesh.polygons[i][2])] * psi5 +
+                           coeffs[getAdditionalVertexBetween(problem.solution.mesh.polygons[i][2], problem.solution.mesh.polygons[i][0])] * psi6;
+                }
+            }
+            throw new ArgumentOutOfRangeException();
+        }
         int getAdditionalVertexBetween(int i, int j)
         {
             if (j > i)
@@ -108,7 +182,8 @@ namespace FEM
         }
         protected override void OnRenderFrame(FrameEventArgs e)
         {
-            time += e.Time * timeScale;
+            if (!pause)
+                time += e.Time * timeScale;
             while (time > problem.solution.to)
             {
                 problem.deltaTime = deltaTime(0, 0, problem.solution.to);
@@ -122,7 +197,7 @@ namespace FEM
 
             GL.UseProgram(shader.id);
 
-            double[] coeffs = problem.solution.getCoeffs(time);
+            double[] coeffs = timeScale == 0 ? problem.solution.prev_prev_q : problem.solution.getCoeffs(time);
             float[] data = new float[problem.mesh.polygons.Length * 12];
             int curArrayIndex = 0;
             foreach (int[] poly in problem.mesh.polygons)
@@ -154,6 +229,13 @@ namespace FEM
         {
             Input.OnUpdateFrame();
 
+            if (Input.IsKeyPressed(Key.Space))
+            {
+                if (timeScale != 0)
+                    pause = !pause;
+                else
+                    problem.next();
+            }
             float scroll = Input.GetScrollDelta();
             if (scroll != 0)
                 camera.scale *= scroll > 0 ? 1.1f : 0.9f;

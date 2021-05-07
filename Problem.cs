@@ -70,9 +70,9 @@ namespace FEM
         public double[] gamma;
         public double deltaTime;
 
-        public int frame { get; private set; } = -1;
         public Solution solution { get; private set; }
 
+        private int frame = -1;
         private List<KeyValuePair<int, int>>[] adjacencyList;
         private MatrixSymm_Sparse globalMatrix;
         private Vector globalVector;
@@ -225,7 +225,7 @@ namespace FEM
             double[] conditionValues = new double[6];
             double[,] alphaMatrix = new double[3, 3];
             double detD;
-            Vector2 A, B, C;
+            Vector2[] v = new Vector2[3];
 
             double prev_prev_coef = (solution.to - solution.middle) / ((solution.to - solution.from) * (solution.middle - solution.from));
             double prev_coef = (solution.to - solution.from) / ((solution.to - solution.middle) * (solution.middle - solution.from));
@@ -239,19 +239,19 @@ namespace FEM
                     globalIndexes[i + 3] = getAdditionalVertexBetween(mesh.polygons[p][i], mesh.polygons[p][i == 2 ? 0 : i + 1]);
                 }
 
-                A = mesh.vertexes[mesh.polygons[p][0]];
-                B = mesh.vertexes[mesh.polygons[p][1]];
-                C = mesh.vertexes[mesh.polygons[p][2]];
-                detD = (B.X - A.X) * (C.Y - A.Y) - (C.X - A.X) * (B.Y - A.Y);
-                alphaMatrix[0, 0] = (B.X * C.Y - C.X * B.Y) / detD;
-                alphaMatrix[1, 0] = -(A.X * C.Y - C.X * A.Y) / detD;
-                alphaMatrix[2, 0] = (A.X * B.Y - B.X * A.Y) / detD;
-                alphaMatrix[0, 1] = -(C.Y - B.Y) / detD;
-                alphaMatrix[1, 1] = (C.Y - A.Y) / detD;
-                alphaMatrix[2, 1] = -(B.Y - A.Y) / detD;
-                alphaMatrix[0, 2] = (C.X - B.X) / detD;
-                alphaMatrix[1, 2] = -(C.X - A.X) / detD;
-                alphaMatrix[2, 2] = (B.X - A.X) / detD;
+                v[0] = mesh.vertexes[mesh.polygons[p][0]];
+                v[1] = mesh.vertexes[mesh.polygons[p][1]];
+                v[2] = mesh.vertexes[mesh.polygons[p][2]];
+                detD = (v[1].X - v[0].X) * (v[2].Y - v[0].Y) - (v[2].X - v[0].X) * (v[1].Y - v[0].Y);
+                alphaMatrix[0, 0] = (v[1].X * v[2].Y - v[2].X * v[1].Y) / detD;
+                alphaMatrix[1, 0] = -(v[0].X * v[2].Y - v[2].X * v[0].Y) / detD;
+                alphaMatrix[2, 0] = (v[0].X * v[1].Y - v[1].X * v[0].Y) / detD;
+                alphaMatrix[0, 1] = -(v[2].Y - v[1].Y) / detD;
+                alphaMatrix[1, 1] = (v[2].Y - v[0].Y) / detD;
+                alphaMatrix[2, 1] = -(v[1].Y - v[0].Y) / detD;
+                alphaMatrix[0, 2] = (v[2].X - v[1].X) / detD;
+                alphaMatrix[1, 2] = -(v[2].X - v[0].X) / detD;
+                alphaMatrix[2, 2] = (v[1].X - v[0].X) / detD;
 
                 detD = Math.Abs(detD);
 
@@ -268,12 +268,12 @@ namespace FEM
                     localMatrix[5][i] = (i != 1 ? 0 : -1.0 / 90.0) * detD;
                 }
 
-                fValues[0] = f(A.X, A.Y, solution.to);
-                fValues[1] = f(B.X, B.Y, solution.to);
-                fValues[2] = f(C.X, C.Y, solution.to);
-                fValues[3] = f((A.X + B.X) / 2.0, (A.Y + B.Y) / 2.0, solution.to);
-                fValues[4] = f((B.X + C.X) / 2.0, (B.Y + C.Y) / 2.0, solution.to);
-                fValues[5] = f((A.X + C.X) / 2.0, (A.Y + C.Y) / 2.0, solution.to);
+                fValues[0] = f(v[0].X, v[0].Y, solution.to);
+                fValues[1] = f(v[1].X, v[1].Y, solution.to);
+                fValues[2] = f(v[2].X, v[2].Y, solution.to);
+                fValues[3] = f((v[0].X + v[1].X) / 2.0, (v[0].Y + v[1].Y) / 2.0, solution.to);
+                fValues[4] = f((v[1].X + v[2].X) / 2.0, (v[1].Y + v[2].Y) / 2.0, solution.to);
+                fValues[5] = f((v[0].X + v[2].X) / 2.0, (v[0].Y + v[2].Y) / 2.0, solution.to);
                 // vector
                 for (int i = 0; i < 6; i++)
                     localVector[i] = 0;
@@ -324,28 +324,33 @@ namespace FEM
 
                 foreach (SecondBoundaryCondition condition in secondBoundaryConditions)
                 {
-                    conditionValues[0] = condition.function(A.X, A.Y, solution.to);
-                    conditionValues[1] = condition.function(B.X, B.Y, solution.to);
-                    conditionValues[2] = condition.function(C.X, C.Y, solution.to);
-                    conditionValues[3] = condition.function((A.X + B.X) / 2.0, (A.Y + B.Y) / 2.0, solution.to);
-                    conditionValues[4] = condition.function((B.X + C.X) / 2.0, (B.Y + C.Y) / 2.0, solution.to);
-                    conditionValues[5] = condition.function((A.X + C.X) / 2.0, (A.Y + C.Y) / 2.0, solution.to);
+                    conditionValues[0] = condition.function(v[0].X, v[0].Y, solution.to);
+                    conditionValues[1] = condition.function(v[1].X, v[1].Y, solution.to);
+                    conditionValues[2] = condition.function(v[2].X, v[2].Y, solution.to);
+                    conditionValues[3] = condition.function((v[0].X + v[1].X) / 2.0, (v[0].Y + v[1].Y) / 2.0, solution.to);
+                    conditionValues[4] = condition.function((v[1].X + v[2].X) / 2.0, (v[1].Y + v[2].Y) / 2.0, solution.to);
+                    conditionValues[5] = condition.function((v[0].X + v[2].X) / 2.0, (v[0].Y + v[2].Y) / 2.0, solution.to);
                     int[] polygon = mesh.polygons[p];
                     int nextPointIndex;
+                    double h;
                     for (int i = 0; i < 3; i++)
-                        if (condition.containsEdge(polygon[0], polygon[1]))
+                    {
+                        nextPointIndex = i == 2 ? 0 : i + 1;
+                        if (condition.containsEdge(polygon[i], polygon[nextPointIndex]))
                         {
-                            nextPointIndex = i == 2 ? 0 : i + 1;
+                            h = Math.Sqrt(Math.Pow(v[i].X - v[nextPointIndex].X, 2.0) +
+                                          Math.Pow(v[i].Y - v[nextPointIndex].Y, 2.0));
                             localVector[i] += (4.0 * conditionValues[i] +
                                                2.0 * conditionValues[i + 3] -
-                                               conditionValues[nextPointIndex]) / 30.0;
+                                               conditionValues[nextPointIndex]) / 30.0 * h;
                             localVector[nextPointIndex] += (4.0 * conditionValues[nextPointIndex] +
                                                2.0 * conditionValues[i + 3] -
-                                               conditionValues[i]) / 30.0;
+                                               conditionValues[i]) / 30.0 * h;
                             localVector[i + 3] += (2.0 * conditionValues[i] +
                                                16.0 * conditionValues[i + 3] +
-                                               2.0 * conditionValues[nextPointIndex]) / 30.0;
+                                               2.0 * conditionValues[nextPointIndex]) / 30.0 * h;
                         }
+                    }
                 }
 
                 // stiffness matrix
